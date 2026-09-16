@@ -1,7 +1,7 @@
 """Etapa 1 (2/5) — Construção do dataset de REFERÊNCIA (limpo).
 
 O dataset de referência é o único usado no treino do baseline. Ele é limpo
-para satisfazer o contrato de dados (`src/data_contract.py`):
+para satisfazer o contrato de dados (`credito/contrato_dados.py`):
 
   1. remove a coluna de índice do CSV original;
   2. remove linhas com valores ausentes (MonthlyIncome / NumberOfDependents);
@@ -10,7 +10,7 @@ para satisfazer o contrato de dados (`src/data_contract.py`):
   5. remove os códigos de sentinela 96/98 dos contadores de atraso.
 
 Uso:
-    python src/prepare_reference.py
+    python scripts/preparar_referencia.py
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from schema import (
+from credito.esquema import (
     COLUMNS,
     MAX_PAST_DUE,
     MIN_AGE_EXCLUSIVE,
@@ -29,16 +29,16 @@ from schema import (
     RAW_INDEX_COLUMN,
 )
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_INPUT = PROJECT_ROOT / "data" / "raw" / "give_me_some_credit_training.csv"
-DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "reference" / "reference.csv"
+RAIZ = Path(__file__).resolve().parents[2]
+DEFAULT_INPUT = RAIZ / "data" / "raw" / "give_me_some_credit_training.csv"
+DEFAULT_OUTPUT = RAIZ / "data" / "reference" / "reference.csv"
 
 
-def prepare_reference(input_csv: Path, output_csv: Path) -> pd.DataFrame:
+def preparar_referencia(input_csv: Path, output_csv: Path) -> pd.DataFrame:
     """Limpa o CSV bruto e grava o dataset de referência."""
     if not input_csv.exists():
         raise FileNotFoundError(
-            f"{input_csv} não encontrado. Rode antes: python src/download_data.py"
+            f"{input_csv} não encontrado. Rode antes: python scripts/baixar_dataset.py"
         )
 
     frame = pd.read_csv(input_csv)
@@ -101,7 +101,9 @@ def prepare_reference(input_csv: Path, output_csv: Path) -> pd.DataFrame:
     print("Preparação da referência concluída:")
     for line in report:
         print(f"  - {line}")
-    print(f"  - taxa de inadimplência (target=1): {frame['SeriousDlqin2yrs'].mean():.4f}")
+    print(
+        f"  - taxa de inadimplência (target=1): {frame['SeriousDlqin2yrs'].mean():.4f}"
+    )
     print(f"  - arquivo: {output_csv}")
     return frame
 
@@ -112,7 +114,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args()
 
-    prepare_reference(args.input, args.output)
+    preparar_referencia(args.input, args.output)
     return 0
 
 

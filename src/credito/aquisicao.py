@@ -9,9 +9,9 @@ de fallback (mesmas colunas, 6.000 amostras) para que o MVP rode de ponta a
 ponta — deixando o bloqueio explícito no console e no README.
 
 Uso:
-    python src/download_data.py                # tenta Kaggle, cai para sintético
-    python src/download_data.py --force-synthetic
-    python src/download_data.py --force        # sobrescreve o CSV existente
+    python scripts/baixar_dataset.py                # tenta Kaggle, cai para sintético
+    python scripts/baixar_dataset.py --force-synthetic
+    python scripts/baixar_dataset.py --force        # sobrescreve o CSV existente
 """
 
 from __future__ import annotations
@@ -24,19 +24,19 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from schema import COLUMNS, RAW_INDEX_COLUMN, TARGET
+from credito.esquema import COLUMNS, RAW_INDEX_COLUMN, TARGET
 
 KAGGLE_DATASET = "brycecf/give-me-some-credit-dataset"
 KAGGLE_TRAIN_FILE = "cs-training.csv"
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "raw" / "give_me_some_credit_training.csv"
+RAIZ = Path(__file__).resolve().parents[2]
+DEFAULT_OUTPUT = RAIZ / "data" / "raw" / "give_me_some_credit_training.csv"
 
 SYNTHETIC_SAMPLES = 6000
 SYNTHETIC_SEED = 42
 
 
-def download_from_kaggle() -> Path:
+def baixar_do_kaggle() -> Path:
     """Baixa o dataset do Kaggle e devolve o caminho do `cs-training.csv`."""
     import kagglehub
 
@@ -47,7 +47,9 @@ def download_from_kaggle() -> Path:
     return train_file
 
 
-def generate_synthetic(samples: int = SYNTHETIC_SAMPLES, seed: int = SYNTHETIC_SEED) -> pd.DataFrame:
+def gerar_sintetico(
+    samples: int = SYNTHETIC_SAMPLES, seed: int = SYNTHETIC_SEED
+) -> pd.DataFrame:
     """Gera um dataset sintético com as mesmas colunas do Give Me Some Credit.
 
     Usado apenas como fallback quando o Kaggle não está acessível. Reproduz as
@@ -66,7 +68,9 @@ def generate_synthetic(samples: int = SYNTHETIC_SAMPLES, seed: int = SYNTHETIC_S
     past_due_30_59 = rng.choice([0, 1, 2, 3], size=samples, p=[0.85, 0.09, 0.04, 0.02])
     past_due_60_89 = rng.choice([0, 1, 2], size=samples, p=[0.94, 0.04, 0.02])
     late_90 = rng.choice([0, 1, 2], size=samples, p=[0.95, 0.035, 0.015])
-    dependents = rng.choice([0, 1, 2, 3, 4, 5], size=samples, p=[0.55, 0.2, 0.13, 0.07, 0.03, 0.02])
+    dependents = rng.choice(
+        [0, 1, 2, 3, 4, 5], size=samples, p=[0.55, 0.2, 0.13, 0.07, 0.03, 0.02]
+    )
 
     # Risco latente -> target desbalanceado (~6,7% de positivos), como no original.
     risk_score = (
@@ -108,13 +112,17 @@ def generate_synthetic(samples: int = SYNTHETIC_SAMPLES, seed: int = SYNTHETIC_S
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Baixa o dataset Give Me Some Credit.")
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="CSV de saída.")
+    parser.add_argument(
+        "--output", type=Path, default=DEFAULT_OUTPUT, help="CSV de saída."
+    )
     parser.add_argument(
         "--force-synthetic",
         action="store_true",
         help="Pula o Kaggle e gera direto o dataset sintético (fallback).",
     )
-    parser.add_argument("--force", action="store_true", help="Sobrescreve o CSV de saída.")
+    parser.add_argument(
+        "--force", action="store_true", help="Sobrescreve o CSV de saída."
+    )
     args = parser.parse_args()
 
     output: Path = args.output
@@ -126,7 +134,7 @@ def main() -> int:
 
     if not args.force_synthetic:
         try:
-            train_file = download_from_kaggle()
+            train_file = baixar_do_kaggle()
             shutil.copyfile(train_file, output)
             frame = pd.read_csv(output)
             print(f"[ok] Dataset do Kaggle copiado para {output}")
@@ -135,14 +143,17 @@ def main() -> int:
             print(f"     colunas: {', '.join(frame.columns)}")
             return 0
         except Exception as exc:  # noqa: BLE001 - queremos reportar qualquer falha do Kaggle
-            print(f"[aviso] Falha ao baixar do Kaggle: {type(exc).__name__}: {exc}", file=sys.stderr)
+            print(
+                f"[aviso] Falha ao baixar do Kaggle: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
             print(
                 "[aviso] Usando dataset SINTÉTICO de fallback. Para usar o dado real, "
                 "autentique no Kaggle e rode novamente com --force.",
                 file=sys.stderr,
             )
 
-    frame = generate_synthetic()
+    frame = gerar_sintetico()
     frame.to_csv(output, index=False)
     print(f"[fallback] Dataset sintético gravado em {output}")
     print(f"     formato: {frame.shape[0]} linhas x {frame.shape[1]} colunas")

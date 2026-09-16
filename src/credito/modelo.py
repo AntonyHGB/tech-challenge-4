@@ -5,7 +5,8 @@ split estratificado treino/teste, e reporta AUC, precision, recall, accuracy e
 F1. O modelo e as métricas são gravados em `artifacts/`.
 
 Uso:
-    python src/train_baseline.py
+    python scripts/treinar_modelo.py
+    python scripts/treinar_modelo.py --input data/reference/reference.csv
 """
 
 from __future__ import annotations
@@ -31,18 +32,18 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from schema import FEATURES, TARGET
+from credito.esquema import FEATURES, TARGET
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_INPUT = PROJECT_ROOT / "data" / "reference" / "reference.csv"
-DEFAULT_MODEL = PROJECT_ROOT / "artifacts" / "model.joblib"
-DEFAULT_METRICS = PROJECT_ROOT / "artifacts" / "baseline_metrics.json"
+RAIZ = Path(__file__).resolve().parents[2]
+DEFAULT_INPUT = RAIZ / "data" / "reference" / "reference.csv"
+DEFAULT_MODEL = RAIZ / "artifacts" / "model.joblib"
+DEFAULT_METRICS = RAIZ / "artifacts" / "baseline_metrics.json"
 
 TEST_SIZE = 0.2
 RANDOM_STATE = 42
 
 
-def build_model() -> Pipeline:
+def construir_modelo() -> Pipeline:
     """Pipeline baseline: imputação -> padronização -> regressão logística."""
     return Pipeline(
         steps=[
@@ -60,11 +61,11 @@ def build_model() -> Pipeline:
     )
 
 
-def train(input_csv: Path, model_path: Path, metrics_path: Path) -> dict:
+def treinar(input_csv: Path, model_path: Path, metrics_path: Path) -> dict:
     if not input_csv.exists():
         raise FileNotFoundError(
-            f"{input_csv} não encontrado. Rode antes: python src/download_data.py "
-            "e python src/prepare_reference.py"
+            f"{input_csv} não encontrado. Rode antes: python scripts/baixar_dataset.py "
+            "e python scripts/preparar_referencia.py"
         )
 
     frame = pd.read_csv(input_csv)
@@ -79,16 +80,16 @@ def train(input_csv: Path, model_path: Path, metrics_path: Path) -> dict:
         stratify=target,
     )
 
-    model = build_model()
+    model = construir_modelo()
     model.fit(x_train, y_train)
 
     probabilities = model.predict_proba(x_test)[:, 1]
     predictions = (probabilities >= 0.5).astype(int)
 
     try:
-        dataset_name = str(input_csv.relative_to(PROJECT_ROOT))
+        dataset_name = str(input_csv.relative_to(RAIZ))
     except ValueError:
-        # --input relativo: relative_to exige subcaminho textual de PROJECT_ROOT.
+        # --input relativo: relative_to exige subcaminho textual de RAIZ.
         dataset_name = str(input_csv)
 
     metrics = {
@@ -111,7 +112,10 @@ def train(input_csv: Path, model_path: Path, metrics_path: Path) -> dict:
     metrics_path.write_text(json.dumps(metrics, indent=2, ensure_ascii=False) + "\n")
 
     print("Treino do baseline concluído:")
-    print(f"  - amostras      : {metrics['n_total']} (treino={metrics['n_train']}, teste={metrics['n_test']})")
+    print(
+        f"  - amostras      : {metrics['n_total']} "
+        f"(treino={metrics['n_train']}, teste={metrics['n_test']})"
+    )
     print(f"  - taxa positivos: {metrics['positive_rate']:.4f}")
     print(f"  - ROC AUC       : {metrics['roc_auc']:.4f}")
     print(f"  - accuracy      : {metrics['accuracy']:.4f}")
@@ -127,13 +131,15 @@ def train(input_csv: Path, model_path: Path, metrics_path: Path) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Treina o classificador baseline de risco.")
+    parser = argparse.ArgumentParser(
+        description="Treina o classificador baseline de risco."
+    )
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
     parser.add_argument("--metrics", type=Path, default=DEFAULT_METRICS)
     args = parser.parse_args()
 
-    train(args.input, args.model, args.metrics)
+    treinar(args.input, args.model, args.metrics)
     return 0
 
 

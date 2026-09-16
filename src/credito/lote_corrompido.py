@@ -10,7 +10,7 @@ os problemas que o contrato precisa barrar:
   5. target inválido (fora de {0, 1})
 
 Uso:
-    python scripts/make_corrupted_batch.py
+    python scripts/gerar_lote_corrompido.py
 """
 
 from __future__ import annotations
@@ -22,17 +22,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT / "src"))
+from credito.esquema import PAST_DUE_COLUMNS, PAST_DUE_SENTINELS, TARGET
 
-from schema import (  # noqa: E402
-    PAST_DUE_COLUMNS,
-    PAST_DUE_SENTINELS,
-    TARGET,
-)
-
-DEFAULT_INPUT = PROJECT_ROOT / "data" / "reference" / "reference.csv"
-DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "corrupted" / "corrupted_batch.csv"
+RAIZ = Path(__file__).resolve().parents[2]
+DEFAULT_INPUT = RAIZ / "data" / "reference" / "reference.csv"
+DEFAULT_OUTPUT = RAIZ / "data" / "corrupted" / "corrupted_batch.csv"
 
 SEED = 7
 N_INVALID_AGE = 15
@@ -43,7 +37,9 @@ N_BAD_PAST_DUE = 25
 N_BAD_TARGET = 20
 
 
-def make_corrupted(reference: pd.DataFrame, seed: int = SEED) -> tuple[pd.DataFrame, list[str]]:
+def gerar_lote_corrompido(
+    reference: pd.DataFrame, seed: int = SEED
+) -> tuple[pd.DataFrame, list[str]]:
     """Aplica as corrupções e devolve (lote, relatório)."""
     rng = np.random.default_rng(seed)
     frame = reference.copy()
@@ -51,7 +47,9 @@ def make_corrupted(reference: pd.DataFrame, seed: int = SEED) -> tuple[pd.DataFr
 
     # 1) Idade <= 18.
     rows = rng.choice(len(frame), size=N_INVALID_AGE, replace=False)
-    frame.loc[frame.index[rows], "age"] = rng.choice([0, 15, 16, 17, 18], size=N_INVALID_AGE)
+    frame.loc[frame.index[rows], "age"] = rng.choice(
+        [0, 15, 16, 17, 18], size=N_INVALID_AGE
+    )
     report.append(f"idade <= 18                          : {N_INVALID_AGE} linhas")
 
     # 2) Renda nula.
@@ -62,12 +60,16 @@ def make_corrupted(reference: pd.DataFrame, seed: int = SEED) -> tuple[pd.DataFr
     # 3) Valores negativos (fora de faixa).
     rows = rng.choice(len(frame), size=N_NEGATIVE, replace=False)
     chosen = frame.index[rows]
-    frame.loc[chosen, "MonthlyIncome"] = -rng.uniform(100, 5000, size=N_NEGATIVE).round(2)
+    frame.loc[chosen, "MonthlyIncome"] = -rng.uniform(
+        100, 5000, size=N_NEGATIVE
+    ).round(2)
     frame.loc[chosen, "RevolvingUtilizationOfUnsecuredLines"] = -rng.uniform(
         0.1, 2.0, size=N_NEGATIVE
     ).round(4)
     frame.loc[chosen, "DebtRatio"] = -rng.uniform(0.1, 3.0, size=N_NEGATIVE).round(4)
-    frame.loc[chosen, "NumberOfDependents"] = -rng.integers(1, 4, size=N_NEGATIVE).astype(float)
+    frame.loc[chosen, "NumberOfDependents"] = -rng.integers(
+        1, 4, size=N_NEGATIVE
+    ).astype(float)
     report.append(f"valores negativos (renda/utiliz/debt) : {N_NEGATIVE} linhas")
 
     # 4) Sentinelas 96/98 nos contadores de atraso (acima da faixa plausível).
@@ -92,7 +94,9 @@ def make_corrupted(reference: pd.DataFrame, seed: int = SEED) -> tuple[pd.DataFr
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Gera o lote corrompido de demonstração.")
+    parser = argparse.ArgumentParser(
+        description="Gera o lote corrompido de demonstração."
+    )
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--seed", type=int, default=SEED)
@@ -100,13 +104,14 @@ def main() -> int:
 
     if not args.input.exists():
         print(
-            f"[erro] {args.input} não encontrado. Rode antes a preparação da referência.",
+            f"[erro] {args.input} não encontrado. "
+            "Rode antes a preparação da referência.",
             file=sys.stderr,
         )
         return 2
 
     reference = pd.read_csv(args.input)
-    corrupted, report = make_corrupted(reference, seed=args.seed)
+    corrupted, report = gerar_lote_corrompido(reference, seed=args.seed)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     corrupted.to_csv(args.output, index=False)
