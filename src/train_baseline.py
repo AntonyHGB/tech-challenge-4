@@ -85,8 +85,14 @@ def train(input_csv: Path, model_path: Path, metrics_path: Path) -> dict:
     probabilities = model.predict_proba(x_test)[:, 1]
     predictions = (probabilities >= 0.5).astype(int)
 
+    try:
+        dataset_name = str(input_csv.relative_to(PROJECT_ROOT))
+    except ValueError:
+        # --input relativo: relative_to exige subcaminho textual de PROJECT_ROOT.
+        dataset_name = str(input_csv)
+
     metrics = {
-        "dataset": str(input_csv.relative_to(PROJECT_ROOT)),
+        "dataset": dataset_name,
         "n_total": int(len(frame)),
         "n_train": int(len(x_train)),
         "n_test": int(len(x_test)),
