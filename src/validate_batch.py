@@ -18,7 +18,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from data_contract import SUITE_NAME, load_batch, validate_dataframe
+import pandas as pd
+
+from data_contract import SUITE_NAME, validate_dataframe
 
 EXIT_OK = 0
 EXIT_BLOCKED = 1
@@ -62,7 +64,7 @@ def run_validation(csv_path: Path) -> int:
         return EXIT_ERROR
 
     try:
-        frame = load_batch(csv_path)
+        frame = pd.read_csv(csv_path)
     except Exception as exc:  # noqa: BLE001
         print(f"[erro] Falha ao ler o CSV: {type(exc).__name__}: {exc}", file=sys.stderr)
         return EXIT_ERROR

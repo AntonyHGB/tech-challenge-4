@@ -35,9 +35,6 @@ PAST_DUE_COLUMNS = [
 ]
 PAST_DUE_SENTINELS = (96, 98)
 
-# Colunas com valores ausentes no arquivo original (tratadas na referência).
-NULLABLE_COLUMNS = ["MonthlyIncome", "NumberOfDependents"]
-
 # Regras de plausibilidade usadas pelo contrato de dados.
 MIN_AGE_EXCLUSIVE = 18
 MAX_AGE = 120

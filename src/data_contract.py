@@ -9,7 +9,7 @@ Regras obrigatórias do enunciado:
   - renda não nula              -> `renda_nao_nula`
   - sem duplicatas              -> `sem_duplicatas`
 
-Regras adicionais de plausibilidade: ver `contract_rules()`.
+Regras adicionais de plausibilidade: ver `CONTRACT_RULES`.
 
 Uso:
     from data_contract import validate_dataframe
@@ -19,7 +19,6 @@ Uso:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 import great_expectations as gx
@@ -46,68 +45,62 @@ NON_NEGATIVE_COLUMNS = [
     "NumberOfDependents",
 ]
 
-
-@dataclass(frozen=True)
-class ContractRule:
-    """Uma regra do contrato, com rótulo legível para relatórios."""
-
-    label: str
-    expectation: Any
-
-
-def contract_rules() -> list[ContractRule]:
-    """Regras do contrato na ordem em que são reportadas."""
-    rules = [
-        ContractRule(
-            "colunas_esperadas",
-            gxe.ExpectTableColumnsToMatchSet(column_set=COLUMNS, exact_match=True),
+# Regras do contrato na ordem em que são reportadas: (rótulo legível, expectation).
+CONTRACT_RULES: list[tuple[str, Any]] = [
+    (
+        "colunas_esperadas",
+        gxe.ExpectTableColumnsToMatchSet(column_set=COLUMNS, exact_match=True),
+    ),
+    (
+        "lote_nao_vazio",
+        gxe.ExpectTableRowCountToBeBetween(min_value=1),
+    ),
+    (
+        "idade_maior_que_18",
+        gxe.ExpectColumnValuesToBeBetween(
+            column="age",
+            min_value=MIN_AGE_EXCLUSIVE,
+            strict_min=True,
+            max_value=MAX_AGE,
         ),
-        ContractRule(
-            "lote_nao_vazio",
-            gxe.ExpectTableRowCountToBeBetween(min_value=1),
-        ),
-        ContractRule(
-            "idade_maior_que_18",
+    ),
+    (
+        "renda_nao_nula",
+        gxe.ExpectColumnValuesToNotBeNull(column="MonthlyIncome"),
+    ),
+    (
+        "sem_duplicatas",
+        gxe.ExpectCompoundColumnsToBeUnique(column_list=COLUMNS),
+    ),
+    (
+        "target_binario",
+        gxe.ExpectColumnValuesToBeInSet(column=TARGET, value_set=VALID_TARGET_VALUES),
+    ),
+]
+
+for _column in NON_NEGATIVE_COLUMNS:
+    CONTRACT_RULES.append(
+        (
+            f"{_column}_nao_negativo",
+            gxe.ExpectColumnValuesToBeBetween(column=_column, min_value=0),
+        )
+    )
+
+for _column in PAST_DUE_COLUMNS:
+    CONTRACT_RULES.append(
+        (
+            f"{_column}_em_faixa_plausivel",
             gxe.ExpectColumnValuesToBeBetween(
-                column="age",
-                min_value=MIN_AGE_EXCLUSIVE,
-                strict_min=True,
-                max_value=MAX_AGE,
+                column=_column, min_value=0, max_value=MAX_PAST_DUE
             ),
-        ),
-        ContractRule(
-            "renda_nao_nula",
-            gxe.ExpectColumnValuesToNotBeNull(column="MonthlyIncome"),
-        ),
-        ContractRule(
-            "sem_duplicatas",
-            gxe.ExpectCompoundColumnsToBeUnique(column_list=COLUMNS),
-        ),
-        ContractRule(
-            "target_binario",
-            gxe.ExpectColumnValuesToBeInSet(column=TARGET, value_set=VALID_TARGET_VALUES),
-        ),
-    ]
-
-    for column in NON_NEGATIVE_COLUMNS:
-        rules.append(
-            ContractRule(
-                f"{column}_nao_negativo",
-                gxe.ExpectColumnValuesToBeBetween(column=column, min_value=0),
-            )
         )
+    )
 
-    for column in PAST_DUE_COLUMNS:
-        rules.append(
-            ContractRule(
-                f"{column}_em_faixa_plausivel",
-                gxe.ExpectColumnValuesToBeBetween(
-                    column=column, min_value=0, max_value=MAX_PAST_DUE
-                ),
-            )
-        )
 
-    return rules
+def _labeled(expectation: Any, label: str) -> Any:
+    """Marca a expectation com o rótulo da regra em `meta.rule`."""
+    expectation.meta = {"rule": label}
+    return expectation
 
 
 def build_context() -> gx.DataContext:
@@ -121,17 +114,14 @@ def build_context() -> gx.DataContext:
 def build_suite(context: gx.DataContext) -> ExpectationSuite:
     """Monta a suite do contrato, com o rótulo de cada regra em `meta.rule`."""
     suite = context.suites.add(ExpectationSuite(name=SUITE_NAME))
-    for rule in contract_rules():
-        rule.expectation.meta = {"rule": rule.label}
-        suite.add_expectation(rule.expectation)
+    for label, expectation in CONTRACT_RULES:
+        suite.add_expectation(_labeled(expectation, label))
     return suite
 
 
-def validate_dataframe(
-    frame: pd.DataFrame, context: gx.DataContext | None = None
-) -> Any:
+def validate_dataframe(frame: pd.DataFrame) -> Any:
     """Valida um DataFrame contra o contrato e devolve o `ValidationResult` do GX."""
-    context = context or build_context()
+    context = build_context()
     suite = build_suite(context)
 
     data_source = context.data_sources.add_pandas(name="ingestion_source")
@@ -140,8 +130,3 @@ def validate_dataframe(
     batch = batch_definition.get_batch(batch_parameters={"dataframe": frame})
 
     return batch.validate(suite)
-
-
-def load_batch(csv_path: str | Any) -> pd.DataFrame:
-    """Carrega um CSV de lote para validação."""
-    return pd.read_csv(csv_path)
