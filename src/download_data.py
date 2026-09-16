@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from schema import COLUMNS, FEATURES, RAW_INDEX_COLUMN, TARGET
+from schema import COLUMNS, RAW_INDEX_COLUMN, TARGET
 
 KAGGLE_DATASET = "brycecf/give-me-some-credit-dataset"
 KAGGLE_TRAIN_FILE = "cs-training.csv"
@@ -146,7 +146,6 @@ def main() -> int:
     frame.to_csv(output, index=False)
     print(f"[fallback] Dataset sintético gravado em {output}")
     print(f"     formato: {frame.shape[0]} linhas x {frame.shape[1]} colunas")
-    print(f"     features esperadas presentes: {len(FEATURES) + 1} de {len(COLUMNS)}")
     return 0
 
 
