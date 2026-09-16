@@ -16,61 +16,68 @@ Expectations, que **bloqueia a ingestão** de lotes fora do contrato.
 
 ```
 tech-challenge-4/
-├── src/
-│   ├── schema.py              # fonte única de verdade: colunas e limites do domínio
-│   ├── download_data.py       # baixa o dataset do Kaggle (fallback sintético)
-│   ├── prepare_reference.py   # limpeza -> data/reference/reference.csv
-│   ├── data_contract.py       # suite de expectations do Great Expectations
-│   ├── validate_batch.py      # valida um lote (exit 1 = ingestão bloqueada)
-│   └── train_baseline.py      # treina o baseline -> artifacts/
-├── scripts/
-│   └── make_corrupted_batch.py  # gera o lote corrompido de demonstração
+├── src/credito/            # pacote instalável (pip install -e ".[dev]")
+│   ├── esquema.py              # fonte única de verdade: colunas e limites do domínio
+│   ├── aquisicao.py            # baixa o dataset do Kaggle (fallback sintético)
+│   ├── preparacao.py           # limpeza -> data/reference/reference.csv
+│   ├── contrato_dados.py       # suite de expectations do Great Expectations
+│   ├── validacao_lote.py       # valida um lote (exit 1 = ingestão bloqueada)
+│   ├── lote_corrompido.py      # gera o lote corrompido de demonstração
+│   └── modelo.py               # treina o baseline -> artifacts/
+├── scripts/                # CLIs finos sobre o pacote
+│   ├── baixar_dataset.py
+│   ├── preparar_referencia.py
+│   ├── validar_lote.py
+│   ├── gerar_lote_corrompido.py
+│   └── treinar_modelo.py
+├── tests/                  # pytest (lotes sintéticos, sem rede/Kaggle)
 ├── data/
 │   ├── raw/            # CSV original do Kaggle (não versionado)
 │   ├── reference/      # dataset de referência limpo (versionado)
 │   └── corrupted/      # lote corrompido gerado (não versionado)
 ├── artifacts/          # model.joblib + baseline_metrics.json (não versionado)
-└── requirements.txt
+├── .github/workflows/ci.yml
+└── pyproject.toml
 ```
 
 ## Como reproduzir
 
-Pré-requisito: Python 3.12.
-
-Os scripts rodam **como script, a partir da raiz do repositório**
-(`python src/<script>.py`): é a execução direta que coloca `src/` no
-`sys.path` e faz os imports internos (`from schema import ...`) funcionarem.
-Executá-los como módulo (`python -m src.<script>`) falha nesses imports.
+Pré-requisito: Python 3.12. O projeto é um pacote instalável (`pip install -e ".[dev]"`)
+e os comandos abaixo rodam da raiz do repositório.
 
 ```bash
 cd tech-challenge-4
 python3.12 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e ".[dev]"
 
 # 1) Baixar o dataset de referência (Give Me Some Credit)
-python src/download_data.py
+python scripts/baixar_dataset.py
 
 # 2) Construir o dataset de REFERÊNCIA (limpo) usado no treino
-python src/prepare_reference.py
+python scripts/preparar_referencia.py
 
 # 3) Treinar o baseline
-python src/train_baseline.py
+python scripts/treinar_modelo.py
 
 # 4) Validar a referência -> PASS, exit code 0
-python src/validate_batch.py data/reference/reference.csv
+python scripts/validar_lote.py data/reference/reference.csv
 echo $?   # 0
 
 # 5) Gerar o lote corrompido de demonstração
-python scripts/make_corrupted_batch.py
+python scripts/gerar_lote_corrompido.py
 
 # 6) Validar o lote corrompido -> FAIL, exit code 1 (ingestão BLOQUEADA)
-python src/validate_batch.py data/corrupted/corrupted_batch.csv
+python scripts/validar_lote.py data/corrupted/corrupted_batch.csv
 echo $?   # 1
 ```
 
+Cada script é um CLI fino sobre o módulo correspondente do pacote `credito`,
+que também pode ser executado via módulo (ex.: `python -m credito.validacao_lote`).
+O CI (`.github/workflows/ci.yml`) roda `ruff check .` e `pytest`.
+
 Os passos 2 e 3 **sobrescrevem** seus arquivos de saída
 (`data/reference/reference.csv` e `artifacts/`) a cada execução; só o passo 1
-(`download_data.py`) tem guarda contra sobrescrita — use `--force` nele se
+(`baixar_dataset.py`) tem guarda contra sobrescrita — use `--force` nele se
 precisar baixar de novo.
 
 ## Contrato de dados (13 regras rígidas)
@@ -127,11 +134,11 @@ O desbalanceamento (6,89% de positivos) explica a precision baixa com
 (150k linhas, target `SeriousDlqin2yrs`), baixado via `kagglehub`. O download
 público funciona sem autenticação.
 
-Se o Kaggle exigir credenciais no ambiente de execução, `download_data.py`
+Se o Kaggle exigir credenciais no ambiente de execução, `baixar_dataset.py`
 gera automaticamente um dataset **sintético** de fallback (6.000 amostras,
 mesmas colunas) e avisa no console — o MVP roda de ponta a ponta de qualquer
 forma. Para usar o dado real depois, autentique com `kagglehub.login()` ou
-coloque `~/.kaggle/kaggle.json` e rode `python src/download_data.py --force`.
+coloque `~/.kaggle/kaggle.json` e rode `python scripts/baixar_dataset.py --force`.
 
 ## Fora de escopo (outras etapas)
 
