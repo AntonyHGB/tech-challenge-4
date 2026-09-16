@@ -1,0 +1,14 @@
+# Tech Challenge Fase 4 — Etapa 1 (MVP)
+# Validação de Dados e Contratos — classificador de risco de crédito + Great Expectations
+#
+# Python 3.12 (testado com 3.12.14).
+# Instalação:
+#   python3.12 -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements.txt
+
+great-expectations==1.23.0
+kagglehub==1.0.2
+joblib==1.6.0
+numpy==2.5.3
+pandas==3.0.5
+scikit-learn==1.9.1

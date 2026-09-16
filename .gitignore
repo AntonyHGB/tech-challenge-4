@@ -1,0 +1,24 @@
+# Ambiente virtual
+.venv/
+venv/
+
+# Dados (raw baixado do Kaggle e lote corrompido de demonstração)
+data/raw/
+data/corrupted/
+
+# Artefatos de treino (modelo e métricas)
+artifacts/
+
+# Caches / build
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+build/
+dist/
+
+# Caches de ferramentas
+.ipynb_checkpoints/
+.DS_Store
