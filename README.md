@@ -37,6 +37,11 @@ tech-challenge-4/
 
 Pré-requisito: Python 3.12.
 
+Os scripts rodam **como script, a partir da raiz do repositório**
+(`python src/<script>.py`): é a execução direta que coloca `src/` no
+`sys.path` e faz os imports internos (`from schema import ...`) funcionarem.
+Executá-los como módulo (`python -m src.<script>`) falha nesses imports.
+
 ```bash
 cd tech-challenge-4
 python3.12 -m venv .venv && source .venv/bin/activate
@@ -63,8 +68,10 @@ python src/validate_batch.py data/corrupted/corrupted_batch.csv
 echo $?   # 1
 ```
 
-Os passos 1–3 não sobrescrevem arquivos existentes; use `--force` no
-`download_data.py` se precisar baixar de novo.
+Os passos 2 e 3 **sobrescrevem** seus arquivos de saída
+(`data/reference/reference.csv` e `artifacts/`) a cada execução; só o passo 1
+(`download_data.py`) tem guarda contra sobrescrita — use `--force` nele se
+precisar baixar de novo.
 
 ## Contrato de dados (13 regras rígidas)
 
@@ -89,11 +96,12 @@ Qualquer linha violando qualquer regra reprova o lote inteiro (sem tolerância `
 ## Referência vs. lote corrompido
 
 O dataset original do Kaggle tem 150.000 linhas com problemas reais:
-29.731 nulos em `MonthlyIncome`, 3.924 em `NumberOfDependents`, 99 linhas
-duplicadas (visíveis após descartar a coluna de índice), 1 registro com
-idade 0 e 145 linhas com os códigos de sentinela 96/98 nos contadores de
-atraso. A limpeza produz a referência com **120.024 linhas** e taxa de
-inadimplência de **6,89%**.
+29.731 nulos em `MonthlyIncome`, 3.924 em `NumberOfDependents`, 609 linhas
+duplicadas quando se ignora a coluna de índice (depois do `dropna` restam 99
+duplicatas, que são as removidas na limpeza), 1 registro com idade 0 e 145
+linhas com os códigos de sentinela 96/98 nos contadores de atraso. A limpeza
+produz a referência com **120.024 linhas** e taxa de inadimplência de
+**6,89%**.
 
 O lote corrompido parte dessa referência e reintroduz os defeitos de
 propósito (idade <= 18, renda nula, negativos, sentinelas, target inválido e
