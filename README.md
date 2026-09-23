@@ -1,4 +1,4 @@
-# Tech Challenge Fase 4 — Etapa 1: Validação de Dados e Contratos
+# Tech Challenge Fase 4 — Etapas 1 e 2: Contratos e Drift de Dados
 
 MVP da Etapa 1: um classificador binário baseline de **risco de crédito**
 (Give Me Some Credit) protegido por um **contrato de dados** com Great
@@ -11,6 +11,8 @@ Expectations, que **bloqueia a ingestão** de lotes fora do contrato.
 2. **Contrato de dados** com Great Expectations: 13 regras rígidas (sem `mostly`).
 3. **Demonstração de bloqueio**: um lote corrompido é reprovado pelo contrato e a
    ingestão é barrada com **exit code 1**.
+4. **Etapa 2**: comparação pontual de features com Evidently, após validar o
+   contrato; gera relatório JSON e distingue drift de violação do contrato.
 
 ## Estrutura
 
@@ -24,12 +26,14 @@ tech-challenge-4/
 │   ├── validacao_lote.py       # valida um lote (exit 1 = ingestão bloqueada)
 │   ├── lote_corrompido.py      # gera o lote corrompido de demonstração
 │   └── modelo.py               # treina o baseline -> artifacts/
+│   └── drift.py                # comparação pontual de features -> relatório JSON
 ├── scripts/                # CLIs finos sobre o pacote
 │   ├── baixar_dataset.py
 │   ├── preparar_referencia.py
 │   ├── validar_lote.py
 │   ├── gerar_lote_corrompido.py
 │   └── treinar_modelo.py
+│   └── detectar_drift.py
 ├── tests/                  # pytest (lotes sintéticos, sem rede/Kaggle)
 ├── data/
 │   ├── raw/            # CSV original do Kaggle (não versionado)
@@ -142,5 +146,56 @@ coloque `~/.kaggle/kaggle.json` e rode `python scripts/baixar_dataset.py --force
 
 ## Fora de escopo (outras etapas)
 
-Monitoramento/observabilidade (Prometheus/Grafana, Etapa 3), detecção de
-drift com Evidently (Etapa 2), documentação LGPD (Etapa 4) e vídeo.
+Monitoramento contínuo/observabilidade (Prometheus/Grafana, Etapa 3),
+documentação LGPD (Etapa 4) e vídeo.
+
+## Etapa 2 — detecção pontual de drift
+
+Com o pacote instalado (`pip install -e ".[dev]"`) e a referência pronta:
+
+```bash
+python scripts/detectar_drift.py data/reference/reference.csv
+# RESULTADO: sem_drift (exit code 0); relatório: .../artifacts/drift_report.json
+
+python scripts/detectar_drift.py data/corrupted/corrupted_batch.csv
+# RESULTADO: lote_invalido (exit code 1); relatório: .../artifacts/drift_report.json
+
+# Para comparar outro lote válido sem sobrescrever o relatório padrão:
+python scripts/detectar_drift.py caminho/lote.csv \
+  --reference data/reference/reference.csv --report caminho/relatorio.json \
+  --min-rows 100 --p-value 0.05 --drift-share 0.5
+```
+
+**Decisões iniciais, revisáveis:** Evidently **0.7.23**; método **Kolmogorov–Smirnov
+(KS)** para as 10 features numéricas (`FEATURES`), com drift por coluna quando
+`p_value < 0.05`. Há drift agregado quando **pelo menos 50%** das features
+(5/10) têm drift. Ambos os limites são ajustáveis no CLI. O mínimo padrão é
+**100 linhas em cada dataset** (`--min-rows`); abaixo dele não se calcula drift.
+Os limites são escolhas operacionais para demonstração, não calibração de risco
+nem garantia estatística (há múltiplas comparações). O target nunca entra no
+cálculo de drift.
+
+O contrato existente é aplicado **primeiro à referência e ao lote**. Códigos
+de saída: `0` sem drift, `1` lote fora do contrato, `2` erro (incluindo amostra
+insuficiente e referência inválida) e `3` drift detectado. O JSON registra
+`status`, caminhos relativos ao diretório de trabalho (ou só o nome para
+arquivos externos a ele) e SHA-256 de ambos os CSVs, número de linhas,
+configuração, `p_value` e `drift` por feature, e contagem/share agregados. Para
+`lote_invalido`, registra regras violadas; para `amostra_insuficiente`, não há
+resultado estatístico. Por exemplo, com o lote de referência como lote atual:
+
+```json
+{"status": "sem_drift", "agregado": {"colunas_com_drift": 0,
+ "total_colunas": 10, "share": 0.0, "drift": false}}
+```
+
+⚠️ Limitações: o contrato da Etapa 1 exige `SeriousDlqin2yrs` mesmo que o
+teste de drift ignore o target; lotes ainda sem rótulo não passam no contrato
+sem uma mudança futura nesse fluxo. O relatório padrão em `artifacts/` não é
+versionado e é sobrescrito a cada execução; use `--report` para preservar
+execuções. Se uma execução falhar, o relatório anterior é removido antes da
+leitura; confira o exit code `2`, pois pode não existir JSON nessa situação.
+`--report` não pode apontar para um CSV de entrada. Drift não equivale a
+degradação de performance nem a violação do contrato. O lote corrompido é
+para testar o contrato, **não** para demonstrar
+drift. Não há agendamento nem alertas contínuos nesta etapa.

@@ -5,6 +5,7 @@ description = "Validação de dados e contratos para o classificador de risco de
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "evidently==0.7.23",
     "great-expectations==1.23.0",
     "kagglehub==1.0.2",
     "joblib==1.6.0",
