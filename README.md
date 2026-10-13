@@ -197,7 +197,8 @@ modelo não existir) e grava um CSV com `probabilidade_inadimplencia` e
 
 O `detectar_drift.py` mantém o **JSON** (`artifacts/drift_report.json`) e os
 **exit codes** e ainda grava o **relatório HTML do Evidently** (`DataDriftPreset`)
-em `reports/drift_report.html`, apontando as variáveis com drift. `--html` troca
+em `reports/drift_report.html` (**versionado** no repositório), apontando as
+variáveis com drift. `--html` troca
 esse destino. O CI gera esse HTML no job `pipeline` e o publica como *artifact*.
 
 ### Comparação pontual (Referência × lote)
