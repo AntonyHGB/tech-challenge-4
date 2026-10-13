@@ -1,4 +1,4 @@
-"""Etapa 2: detecção pontual de drift de features, após validação do contrato."""
+"""Etapa 2: drift de features (JSON + HTML), após validação do contrato."""
 
 from __future__ import annotations
 
@@ -16,10 +16,12 @@ from evidently.metrics import ValueDrift
 
 from credito.contrato_dados import validar_dataframe
 from credito.esquema import FEATURES
+from credito.relatorio_drift import gerar_html_drift
 
 RAIZ = Path(__file__).resolve().parents[2]
 DEFAULT_REFERENCE = RAIZ / "data" / "reference" / "reference.csv"
 DEFAULT_REPORT = RAIZ / "artifacts" / "drift_report.json"
+DEFAULT_HTML = RAIZ / "reports" / "drift_report.html"
 MIN_ROWS = 100
 P_VALUE = 0.05
 DRIFT_SHARE = 0.5
@@ -78,11 +80,22 @@ def comparar(
     min_rows: int = MIN_ROWS,
     p_value: float = P_VALUE,
     drift_share: float = DRIFT_SHARE,
+    html_path: Path | None = None,
 ) -> int:
-    """Escreve relatório e retorna 0=estável, 1=inválido, 2=erro, 3=drift."""
+    """Escreve relatório (JSON e, se pedido, HTML) e devolve o exit code.
+
+    0=estável, 1=inválido, 2=erro, 3=drift.
+    """
     if report_path.resolve() in (reference_path.resolve(), current_path.resolve()):
         raise ValueError(
             "O caminho do relatório deve ser diferente dos CSVs de entrada"
+        )
+    if html_path is not None and html_path.resolve() in (
+        reference_path.resolve(),
+        current_path.resolve(),
+    ):
+        raise ValueError(
+            "O caminho do HTML deve ser diferente dos CSVs de entrada"
         )
     # Uma falha posterior não deve deixar um resultado de execução anterior utilizável.
     report_path.unlink(missing_ok=True)
@@ -156,6 +169,8 @@ def comparar(
         }
     )
     _gravar(report_path, payload)
+    if html_path is not None:
+        gerar_html_drift(reference, current, html_path)
     return EXIT_DRIFT if detected else EXIT_STABLE
 
 
@@ -166,6 +181,12 @@ def main() -> int:
     parser.add_argument("lote", type=Path)
     parser.add_argument("--reference", type=Path, default=DEFAULT_REFERENCE)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
+    parser.add_argument(
+        "--html",
+        type=Path,
+        default=DEFAULT_HTML,
+        help="Destino do relatório HTML do Evidently (não usado em erro).",
+    )
     parser.add_argument("--min-rows", type=int, default=MIN_ROWS)
     parser.add_argument("--p-value", type=float, default=P_VALUE)
     parser.add_argument("--drift-share", type=float, default=DRIFT_SHARE)
@@ -178,6 +199,7 @@ def main() -> int:
             args.min_rows,
             args.p_value,
             args.drift_share,
+            args.html,
         )
     except (OSError, ValueError, KeyError, pd.errors.ParserError) as exc:
         print(f"[erro] {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -188,7 +210,10 @@ def main() -> int:
         EXIT_ERROR: "amostra_insuficiente",
         EXIT_DRIFT: "drift_detectado",
     }
-    print(f"RESULTADO: {labels[code]} (exit code {code}); relatório: {args.report}")
+    message = f"RESULTADO: {labels[code]} (exit code {code}); relatório: {args.report}"
+    if code in (EXIT_STABLE, EXIT_DRIFT):
+        message += f"; HTML: {args.html}"
+    print(message)
     return code
 
 

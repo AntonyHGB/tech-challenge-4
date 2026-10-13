@@ -2,9 +2,10 @@
 .venv/
 venv/
 
-# Dados (raw baixado do Kaggle e lote corrompido de demonstração)
+# Dados (raw baixado do Kaggle, lote corrompido e produção simulada)
 data/raw/
 data/corrupted/
+data/production/
 
 # Artefatos de treino (modelo e métricas)
 artifacts/

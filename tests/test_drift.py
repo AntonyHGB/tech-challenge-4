@@ -95,6 +95,8 @@ def test_cli_sucesso_substitui_relatorio_e_usa_caminho_relativo(
             "referencia.csv",
             "--report",
             "relatorio.json",
+            "--html",
+            "relatorio.html",
         ],
     )
 

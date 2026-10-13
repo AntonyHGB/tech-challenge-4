@@ -11,8 +11,10 @@ Expectations, que **bloqueia a ingestão** de lotes fora do contrato.
 2. **Contrato de dados** com Great Expectations: 13 regras rígidas (sem `mostly`).
 3. **Demonstração de bloqueio**: um lote corrompido é reprovado pelo contrato e a
    ingestão é barrada com **exit code 1**.
-4. **Etapa 2**: comparação pontual de features com Evidently, após validar o
-   contrato; gera relatório JSON e distingue drift de violação do contrato.
+4. **Etapa 2**: **Dataset de Produção** simulado (passagem do tempo, 7 features
+   com distribuição deslocada), **predições** do baseline e **relatório de drift**
+   com Evidently — HTML em `reports/` + JSON — distinguindo drift de violação do
+   contrato.
 
 ## Estrutura
 
@@ -25,21 +27,28 @@ tech-challenge-4/
 │   ├── contrato_dados.py       # suite de expectations do Great Expectations
 │   ├── validacao_lote.py       # valida um lote (exit 1 = ingestão bloqueada)
 │   ├── lote_corrompido.py      # gera o lote corrompido de demonstração
-│   └── modelo.py               # treina o baseline -> artifacts/
-│   └── drift.py                # comparação pontual de features -> relatório JSON
+│   ├── modelo.py               # treina o baseline -> artifacts/
+│   ├── drift.py                # drift: relatório JSON + exit codes (+ HTML)
+│   ├── relatorio_drift.py      # relatório HTML do Evidently -> reports/
+│   ├── simulacao_producao.py   # Dataset de Produção (passagem do tempo)
+│   └── predicao.py             # predições do baseline -> CSV
 ├── scripts/                # CLIs finos sobre o pacote
 │   ├── baixar_dataset.py
 │   ├── preparar_referencia.py
 │   ├── validar_lote.py
 │   ├── gerar_lote_corrompido.py
-│   └── treinar_modelo.py
-│   └── detectar_drift.py
+│   ├── treinar_modelo.py
+│   ├── simular_producao.py
+│   ├── detectar_drift.py
+│   └── predizer.py
 ├── tests/                  # pytest (lotes sintéticos, sem rede/Kaggle)
 ├── data/
 │   ├── raw/            # CSV original do Kaggle (não versionado)
 │   ├── reference/      # dataset de referência limpo (versionado)
+│   ├── production/     # Dataset de Produção simulado (não versionado)
 │   └── corrupted/      # lote corrompido gerado (não versionado)
 ├── artifacts/          # model.joblib + baseline_metrics.json (não versionado)
+├── reports/            # relatório de drift HTML do Evidently (versionado)
 ├── .github/workflows/ci.yml
 └── pyproject.toml
 ```
@@ -73,6 +82,19 @@ python scripts/gerar_lote_corrompido.py
 # 6) Validar o lote corrompido -> FAIL, exit code 1 (ingestão BLOQUEADA)
 python scripts/validar_lote.py data/corrupted/corrupted_batch.csv
 echo $?   # 1
+
+# --- Etapa 2: Dataset de Produção, predições e drift ---
+
+# 7) Simular o Dataset de Produção (passagem do tempo -> data/production/)
+python scripts/simular_producao.py
+
+# 8) Gerar as predições do baseline para o Dataset de Produção
+python scripts/predizer.py --input data/production/producao_t3.csv \
+  --output data/production/predicoes_t3.csv
+
+# 9) Detectar drift -> relatório JSON + HTML em reports/
+python scripts/detectar_drift.py data/production/producao_t3.csv
+echo $?   # 3 (drift detectado); HTML em reports/drift_report.html
 ```
 
 Cada script é um CLI fino sobre o módulo correspondente do pacote `credito`,
@@ -149,7 +171,36 @@ coloque `~/.kaggle/kaggle.json` e rode `python scripts/baixar_dataset.py --force
 Monitoramento contínuo/observabilidade (Prometheus/Grafana, Etapa 3),
 documentação LGPD (Etapa 4) e vídeo.
 
-## Etapa 2 — detecção pontual de drift
+## Etapa 2 — Dataset de Produção, predições e drift
+
+O fluxo completo da etapa é (com o pacote instalado em `pip install -e ".[dev]"`):
+
+```bash
+python scripts/simular_producao.py       # data/production/producao_t{1,2,3}.csv
+python scripts/predizer.py --input data/production/producao_t3.csv
+python scripts/detectar_drift.py data/production/producao_t3.csv
+echo $?   # 3 (drift detectado) -> artifacts/drift_report.json + reports/drift_report.html
+```
+
+O **Dataset de Produção** (`simulacao_producao.py`) parte da **Referência** e
+desloca intencionalmente a distribuição de 7 features para simular a passagem do
+tempo: `MonthlyIncome` (renda cresce com a inflação + variação individual), `age`
+(a população envelhece), `DebtRatio`, `RevolvingUtilizationOfUnsecuredLines` e os
+3 contadores de atraso (inadimplência sobe). É **drift de distribuição**, não
+corrupção: todos os valores permanecem dentro das faixas do contrato e o lote
+**passa** no contrato. A geração é **determinística** pela `--seed` e produz
+`--stages` estágios (padrão 3) em `data/production/`.
+
+O `predizer.py` carrega `artifacts/model.joblib` (falha com mensagem clara se o
+modelo não existir) e grava um CSV com `probabilidade_inadimplencia` e
+`classe_prevista`; se o rótulo estiver presente, reporta métricas no console.
+
+O `detectar_drift.py` mantém o **JSON** (`artifacts/drift_report.json`) e os
+**exit codes** e ainda grava o **relatório HTML do Evidently** (`DataDriftPreset`)
+em `reports/drift_report.html`, apontando as variáveis com drift. `--html` troca
+esse destino. O CI gera esse HTML no job `pipeline` e o publica como *artifact*.
+
+### Comparação pontual (Referência × lote)
 
 Com o pacote instalado (`pip install -e ".[dev]"`) e a referência pronta:
 
@@ -191,9 +242,11 @@ resultado estatístico. Por exemplo, com o lote de referência como lote atual:
 
 ⚠️ Limitações: o contrato da Etapa 1 exige `SeriousDlqin2yrs` mesmo que o
 teste de drift ignore o target; lotes ainda sem rótulo não passam no contrato
-sem uma mudança futura nesse fluxo. O relatório padrão em `artifacts/` não é
+sem uma mudança futura nesse fluxo. O relatório JSON padrão em `artifacts/` não é
 versionado e é sobrescrito a cada execução; use `--report` para preservar
-execuções. Se uma execução falhar, o relatório anterior é removido antes da
+execuções. O HTML fica em `reports/` (versionado) e também é sobrescrito a cada
+execução; use `--html` para trocar o destino. Se uma execução falhar, o relatório
+anterior é removido antes da
 leitura; confira o exit code `2`, pois pode não existir JSON nessa situação.
 `--report` não pode apontar para um CSV de entrada. Drift não equivale a
 degradação de performance nem a violação do contrato. O lote corrompido é
