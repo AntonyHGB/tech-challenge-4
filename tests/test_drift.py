@@ -95,6 +95,8 @@ def test_cli_sucesso_substitui_relatorio_e_usa_caminho_relativo(
             "referencia.csv",
             "--report",
             "relatorio.json",
+            "--html",
+            "relatorio.html",
         ],
     )
 
@@ -121,6 +123,8 @@ def test_referencia_invalida_remove_relatorio_anterior(tmp_path, monkeypatch, ca
             str(paths[0]),
             "--report",
             str(paths[2]),
+            "--html",
+            str(paths[2].with_suffix(".html")),
         ],
     )
 
@@ -143,6 +147,8 @@ def test_erro_leitura_remove_relatorio_anterior(tmp_path, monkeypatch, capsys):
             str(paths[0]),
             "--report",
             str(paths[2]),
+            "--html",
+            str(paths[2].with_suffix(".html")),
         ],
     )
 
@@ -169,6 +175,8 @@ def test_erro_escrita_remove_relatorio_anterior(tmp_path, monkeypatch, capsys):
             str(paths[0]),
             "--report",
             str(paths[2]),
+            "--html",
+            str(paths[2].with_suffix(".html")),
         ],
     )
     assert main() == EXIT_ERROR
