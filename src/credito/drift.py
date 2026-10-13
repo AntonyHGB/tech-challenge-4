@@ -73,6 +73,22 @@ def _gravar(path: Path, payload: dict) -> None:
             temporary.unlink(missing_ok=True)
 
 
+def _gravar_html(reference: pd.DataFrame, current: pd.DataFrame, path: Path) -> None:
+    """Gera o HTML em temporário do mesmo diretório e substitui atomicamente."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, suffix=".html", delete=False
+        ) as output:
+            temporary = Path(output.name)
+        gerar_html_drift(reference, current, temporary)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def comparar(
     reference_path: Path,
     current_path: Path,
@@ -99,6 +115,8 @@ def comparar(
         )
     # Uma falha posterior não deve deixar um resultado de execução anterior utilizável.
     report_path.unlink(missing_ok=True)
+    if html_path is not None:
+        html_path.unlink(missing_ok=True)
     if min_rows < 2 or not 0 < p_value < 1 or not 0 < drift_share <= 1:
         raise ValueError("Use min_rows >= 2, 0 < p_value < 1 e 0 < drift_share <= 1")
     reference = pd.read_csv(reference_path)
@@ -168,9 +186,9 @@ def comparar(
             },
         }
     )
-    _gravar(report_path, payload)
     if html_path is not None:
-        gerar_html_drift(reference, current, html_path)
+        _gravar_html(reference, current, html_path)
+    _gravar(report_path, payload)
     return EXIT_DRIFT if detected else EXIT_STABLE
 
 
@@ -207,7 +225,7 @@ def main() -> int:
     labels = {
         EXIT_STABLE: "sem_drift",
         EXIT_INVALID: "lote_invalido",
-        EXIT_ERROR: "amostra_insuficiente",
+        EXIT_ERROR: "erro",
         EXIT_DRIFT: "drift_detectado",
     }
     message = f"RESULTADO: {labels[code]} (exit code {code}); relatório: {args.report}"
