@@ -19,6 +19,10 @@ dev = [
     "pytest==9.1.1",
     "ruff==0.16.5",
 ]
+monitoramento = [
+    "mlflow==3.17.1",
+    "psutil==7.2.2",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
