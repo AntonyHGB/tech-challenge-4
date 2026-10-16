@@ -61,6 +61,22 @@ def construir_modelo() -> Pipeline:
     )
 
 
+def dividir_referencia(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Separa a referência em (treino, holdout) com split estratificado e fixo.
+
+    Fica numa função só para o treino e a simulação de produção usarem
+    exatamente o mesmo corte: a produção simulada parte do holdout, então o
+    modelo nunca é avaliado em linhas que ele viu no treino.
+    """
+    treino, holdout = train_test_split(
+        frame,
+        test_size=TEST_SIZE,
+        random_state=RANDOM_STATE,
+        stratify=frame[TARGET],
+    )
+    return treino, holdout
+
+
 def treinar(input_csv: Path, model_path: Path, metrics_path: Path) -> dict:
     if not input_csv.exists():
         raise FileNotFoundError(
@@ -69,16 +85,11 @@ def treinar(input_csv: Path, model_path: Path, metrics_path: Path) -> dict:
         )
 
     frame = pd.read_csv(input_csv)
-    features = frame[FEATURES]
     target = frame[TARGET]
 
-    x_train, x_test, y_train, y_test = train_test_split(
-        features,
-        target,
-        test_size=TEST_SIZE,
-        random_state=RANDOM_STATE,
-        stratify=target,
-    )
+    treino, holdout = dividir_referencia(frame)
+    x_train, y_train = treino[FEATURES], treino[TARGET]
+    x_test, y_test = holdout[FEATURES], holdout[TARGET]
 
     model = construir_modelo()
     model.fit(x_train, y_train)

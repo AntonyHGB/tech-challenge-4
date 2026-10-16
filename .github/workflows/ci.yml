@@ -44,15 +44,38 @@ jobs:
       - run: pip install -e ".[dev]"
       # A referência já está versionada em data/reference/reference.csv:
       # este job NÃO baixa do Kaggle (sem rede).
+      # O HTML versionado no checkout vem de uma execução anterior: removemos
+      # apenas reports/drift_report.html antes do pipeline para que um passo
+      # posterior que falhe jamais publique um relatório obsoleto como artefato.
+      - name: Remover o HTML de drift do checkout (evita artefato obsoleto)
+        run: rm -f reports/drift_report.html
       - name: Treinar o baseline (gera artifacts/)
         run: python scripts/treinar_modelo.py
       - name: Simular o Dataset de Produção (passagem do tempo)
         run: python scripts/simular_producao.py
+      - name: Validar um lote de produção sem rótulo (perfil inferencia)
+        run: |
+          python - <<'PY'
+          import pandas as pd
+
+          from credito.esquema import TARGET
+
+          frame = pd.read_csv("data/production/producao_t1.csv")
+          frame.drop(columns=[TARGET]).to_csv(
+              "data/production/producao_t1_sem_rotulo.csv", index=False
+          )
+          PY
+          python scripts/validar_lote.py \
+            data/production/producao_t1_sem_rotulo.csv --perfil inferencia
       - name: Predições do Dataset de Produção
         run: |
           python scripts/predizer.py \
             --input data/production/producao_t3.csv \
             --output data/production/predicoes_t3.csv
+      - name: Validar as predições no perfil inferencia (aceita colunas extras)
+        run: |
+          python scripts/validar_lote.py \
+            data/production/predicoes_t3.csv --perfil inferencia
       - name: Detectar drift (exit 3 é o resultado esperado)
         run: |
           set +e
@@ -64,10 +87,14 @@ jobs:
             echo "::error::Esperado exit 3 (drift detectado), obtido $codigo"
             exit 1
           fi
-      - name: Publicar o relatório de drift como artefato
+      # Sem --html/--report explícitos, o drift grava reports/drift_report.html
+      # (regenerado acima) e artifacts/drift_report.json. Publicamos os dois.
+      - name: Publicar os relatórios de drift (HTML + JSON) como artefato
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: drift-report
-          path: reports/
+          path: |
+            reports/drift_report.html
+            artifacts/drift_report.json
           if-no-files-found: warn

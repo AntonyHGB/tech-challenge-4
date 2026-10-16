@@ -11,14 +11,24 @@ Regras obrigatórias do enunciado:
 
 Regras adicionais de plausibilidade: ver `construir_regras`.
 
+Perfis do contrato:
+  - `treino`     (padrão): exige o rótulo `SeriousDlqin2yrs` e exatamente as
+    colunas do esquema. É o que vale para a referência.
+  - `inferencia`: para lotes de produção. Em crédito o rótulo só aparece meses
+    depois (o target mede atraso em 2 anos), então o lote pode chegar sem ele
+    e com colunas extras (ex.: as predições). As regras das features são as
+    mesmas; só saem a checagem do target e o "match exato" de colunas.
+
 Uso:
     from credito.contrato_dados import validar_dataframe
-    result = validar_dataframe(df)
+    result = validar_dataframe(df)                       # perfil treino
+    result = validar_dataframe(df, perfil="inferencia")  # lote de produção
     result.success  # bool
 """
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 import great_expectations as gx
@@ -28,6 +38,7 @@ from great_expectations.core import ExpectationSuite
 
 from credito.esquema import (
     COLUMNS,
+    FEATURES,
     MAX_AGE,
     MAX_PAST_DUE,
     MIN_AGE_EXCLUSIVE,
@@ -38,6 +49,17 @@ from credito.esquema import (
 
 SUITE_NAME = "give_me_some_credit_ingestion_contract"
 
+PERFIL_TREINO = "treino"
+PERFIL_INFERENCIA = "inferencia"
+PERFIS = (PERFIL_TREINO, PERFIL_INFERENCIA)
+
+# Finitude numérica de verdade: limites = ±sys.float_info.max. Diferente de
+# uma regex, reprova "1e999"/"9"*400 (estouram float64) e strings não
+# numéricas, que o GX marca como falha ao comparar com os limites.
+# O GX ignora nulos nas expectations de valores, então a checagem de nulo
+# fica em uma regra própria (`*_nao_nula` / `target_nao_nulo`).
+LIMITE_FINITO = sys.float_info.max
+
 # Colunas cujo valor deve ser sempre >= 0.
 NON_NEGATIVE_COLUMNS = [
     "MonthlyIncome",
@@ -46,17 +68,30 @@ NON_NEGATIVE_COLUMNS = [
     "NumberOfDependents",
 ]
 
-def construir_regras() -> list[tuple[str, Any]]:
+def construir_regras(perfil: str = PERFIL_TREINO) -> list[tuple[str, Any]]:
     """Monta as regras do contrato na ordem em que são reportadas.
 
     As expectations são criadas a cada chamada: o GX não permite adicionar a
     mesma expectation a duas suites (cada uma recebe um `id` próprio).
     """
-    regras: list[tuple[str, Any]] = [
-        (
+    if perfil not in PERFIS:
+        raise ValueError(f"Perfil desconhecido: {perfil!r} (use um de {PERFIS})")
+    treino = perfil == PERFIL_TREINO
+
+    if treino:
+        regra_colunas = (
             "colunas_esperadas",
             gxe.ExpectTableColumnsToMatchSet(column_set=COLUMNS, exact_match=True),
-        ),
+        )
+    else:
+        # exact_match=False: as features precisam estar lá, extras são aceitas.
+        regra_colunas = (
+            "features_presentes",
+            gxe.ExpectTableColumnsToMatchSet(column_set=FEATURES, exact_match=False),
+        )
+
+    regras: list[tuple[str, Any]] = [
+        regra_colunas,
         (
             "lote_nao_vazio",
             gxe.ExpectTableRowCountToBeBetween(min_value=1),
@@ -76,15 +111,27 @@ def construir_regras() -> list[tuple[str, Any]]:
         ),
         (
             "sem_duplicatas",
-            gxe.ExpectCompoundColumnsToBeUnique(column_list=COLUMNS),
-        ),
-        (
-            "target_binario",
-            gxe.ExpectColumnValuesToBeInSet(
-                column=TARGET, value_set=VALID_TARGET_VALUES
+            gxe.ExpectCompoundColumnsToBeUnique(
+                column_list=COLUMNS if treino else FEATURES
             ),
         ),
     ]
+
+    if treino:
+        regras.append(
+            (
+                "target_binario",
+                gxe.ExpectColumnValuesToBeInSet(
+                    column=TARGET, value_set=VALID_TARGET_VALUES
+                ),
+            )
+        )
+        regras.append(
+            (
+                "target_nao_nulo",
+                gxe.ExpectColumnValuesToNotBeNull(column=TARGET),
+            )
+        )
 
     for _column in NON_NEGATIVE_COLUMNS:
         regras.append(
@@ -100,6 +147,27 @@ def construir_regras() -> list[tuple[str, Any]]:
                 f"{_column}_em_faixa_plausivel",
                 gxe.ExpectColumnValuesToBeBetween(
                     column=_column, min_value=0, max_value=MAX_PAST_DUE
+                ),
+            )
+        )
+
+    # Sanidade de todas as features (os dois perfis): não nula e finita.
+    # MonthlyIncome já tem a regra rígida `renda_nao_nula`.
+    for _column in FEATURES:
+        if _column != "MonthlyIncome":
+            regras.append(
+                (
+                    f"{_column}_nao_nula",
+                    gxe.ExpectColumnValuesToNotBeNull(column=_column),
+                )
+            )
+        regras.append(
+            (
+                f"{_column}_finita_e_numerica",
+                gxe.ExpectColumnValuesToBeBetween(
+                    column=_column,
+                    min_value=-LIMITE_FINITO,
+                    max_value=LIMITE_FINITO,
                 ),
             )
         )
@@ -121,18 +189,20 @@ def criar_contexto() -> gx.DataContext:
     return context
 
 
-def criar_suite(context: gx.DataContext) -> ExpectationSuite:
+def criar_suite(
+    context: gx.DataContext, perfil: str = PERFIL_TREINO
+) -> ExpectationSuite:
     """Monta a suite do contrato, com o rótulo de cada regra em `meta.rule`."""
-    suite = context.suites.add(ExpectationSuite(name=SUITE_NAME))
-    for label, expectation in construir_regras():
+    suite = context.suites.add(ExpectationSuite(name=f"{SUITE_NAME}_{perfil}"))
+    for label, expectation in construir_regras(perfil):
         suite.add_expectation(_rotular(expectation, label))
     return suite
 
 
-def validar_dataframe(frame: pd.DataFrame) -> Any:
+def validar_dataframe(frame: pd.DataFrame, perfil: str = PERFIL_TREINO) -> Any:
     """Valida um DataFrame contra o contrato e devolve o `ValidationResult` do GX."""
     context = criar_contexto()
-    suite = criar_suite(context)
+    suite = criar_suite(context, perfil)
 
     data_source = context.data_sources.add_pandas(name="ingestion_source")
     data_asset = data_source.add_dataframe_asset(name="ingestion_asset")

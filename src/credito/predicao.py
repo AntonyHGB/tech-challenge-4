@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
@@ -26,7 +27,8 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-from credito.esquema import FEATURES, TARGET
+from credito.contrato_dados import PERFIL_INFERENCIA, validar_dataframe
+from credito.esquema import FEATURES, TARGET, VALID_TARGET_VALUES
 
 RAIZ = Path(__file__).resolve().parents[2]
 DEFAULT_MODEL = RAIZ / "artifacts" / "model.joblib"
@@ -48,6 +50,81 @@ def carregar_modelo(model_path: Path):
     return joblib.load(model_path)
 
 
+def _bloquear_saida_destrutiva(
+    output_csv: Path, input_csv: Path, model_path: Path
+) -> None:
+    """Recusa --output igual ao input ou ao modelo (antes de ler/carregar/gravar)."""
+    saida = output_csv.resolve()
+    if saida == input_csv.resolve():
+        alvo = "o dataset de entrada"
+    elif saida == model_path.resolve():
+        alvo = "o modelo"
+    else:
+        return
+    raise ValueError(
+        f"Saída não pode sobrescrever {alvo}: --output={output_csv}. "
+        "Escolha outro caminho de saída."
+    )
+
+
+def _nome_da_regra(expectation_config) -> str:
+    meta = getattr(expectation_config, "meta", None) or {}
+    return meta.get("rule") or expectation_config.type
+
+
+def _validar_lote(frame: pd.DataFrame) -> None:
+    """Aplica o contrato no perfil de inferência antes de carregar/aplicar o modelo."""
+    resultado = validar_dataframe(frame, PERFIL_INFERENCIA)
+    if resultado.success:
+        return
+    violadas = sorted(
+        _nome_da_regra(detalle.expectation_config)
+        for detalle in resultado.results
+        if not detalle.success
+    )
+    raise ValueError(
+        "Dataset de produção não passou no contrato de dados "
+        f"(perfil {PERFIL_INFERENCIA}); regras violadas: {', '.join(violadas)}"
+    )
+
+
+def _rotulo_valido(frame: pd.DataFrame) -> pd.Series | None:
+    """Rótulo ausente -> None; presente precisa ser finito e binário (0/1)."""
+    if TARGET not in frame.columns:
+        return None
+    rotulo = pd.to_numeric(frame[TARGET], errors="coerce")
+    if rotulo.isna().any() or not np.isfinite(rotulo).all():
+        raise ValueError(
+            f"Rótulo '{TARGET}' contém valores nulos ou não finitos; "
+            "corrija o dataset antes de gravar as predições."
+        )
+    if not rotulo.isin(VALID_TARGET_VALUES).all():
+        distintos = sorted(set(rotulo.tolist()))[:5]
+        raise ValueError(
+            f"Rótulo '{TARGET}' deve ser binário {VALID_TARGET_VALUES}; "
+            f"valores encontrados (amostra): {distintos}"
+        )
+    return rotulo
+
+
+def _calcular_metricas(
+    rotulo: pd.Series, probabilidades, classes
+) -> dict[str, float | int | None]:
+    """Métricas do lote; `roc_auc` fica None quando o rótulo tem uma só classe."""
+    com_roc = rotulo.nunique() >= 2
+    return {
+        "n": int(len(rotulo)),
+        "taxa_prevista_positivos": round(float(classes.mean()), 4),
+        "roc_auc": (
+            round(float(roc_auc_score(rotulo, probabilidades)), 4) if com_roc else None
+        ),
+        "accuracy": round(float(accuracy_score(rotulo, classes)), 4),
+        "precision": round(float(precision_score(rotulo, classes, zero_division=0)), 4),
+        "recall": round(float(recall_score(rotulo, classes, zero_division=0)), 4),
+        "f1": round(float(f1_score(rotulo, classes, zero_division=0)), 4),
+    }
+
+
 def predizer(input_csv: Path, model_path: Path, output_csv: Path) -> dict | None:
     """Gera prob/classe para o CSV e devolve as métricas (ou None sem rótulo)."""
     if not input_csv.exists():
@@ -56,15 +133,28 @@ def predizer(input_csv: Path, model_path: Path, output_csv: Path) -> dict | None
             "Rode antes: python scripts/simular_producao.py"
         )
 
-    model = carregar_modelo(model_path)
+    _bloquear_saida_destrutiva(output_csv, input_csv, model_path)
+
     frame = pd.read_csv(input_csv)
 
     faltantes = [coluna for coluna in FEATURES if coluna not in frame.columns]
     if faltantes:
         raise ValueError(f"Colunas de feature ausentes no CSV: {faltantes}")
 
+    _validar_lote(frame)
+    rotulo = _rotulo_valido(frame)
+
+    model = carregar_modelo(model_path)
+
     probabilidades = model.predict_proba(frame[FEATURES])[:, 1]
     classes = (probabilidades >= LIMITE).astype(int)
+
+    # Métricas antes de qualquer escrita: rótulo inválido nunca gera CSV parcial.
+    metricas = (
+        _calcular_metricas(rotulo, probabilidades, classes)
+        if rotulo is not None
+        else None
+    )
 
     resultado = frame.copy()
     resultado[PROBABILIDADE] = probabilidades.round(6)
@@ -73,21 +163,6 @@ def predizer(input_csv: Path, model_path: Path, output_csv: Path) -> dict | None
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     resultado.to_csv(output_csv, index=False)
 
-    metricas = None
-    if TARGET in frame.columns:
-        rotulo = frame[TARGET]
-        metricas = {
-            "n": int(len(frame)),
-            "taxa_prevista_positivos": round(float(classes.mean()), 4),
-            "roc_auc": round(float(roc_auc_score(rotulo, probabilidades)), 4),
-            "accuracy": round(float(accuracy_score(rotulo, classes)), 4),
-            "precision": round(
-                float(precision_score(rotulo, classes, zero_division=0)), 4
-            ),
-            "recall": round(float(recall_score(rotulo, classes, zero_division=0)), 4),
-            "f1": round(float(f1_score(rotulo, classes, zero_division=0)), 4),
-        }
-
     print("Predição do dataset de produção concluída:")
     print(f"  - modelo : {model_path}")
     print(f"  - entrada: {input_csv} ({len(frame)} linhas)")
@@ -95,10 +170,12 @@ def predizer(input_csv: Path, model_path: Path, output_csv: Path) -> dict | None
     print(f"  - colunas: '{PROBABILIDADE}', '{CLASSE}'")
     if metricas is not None:
         taxa = metricas["taxa_prevista_positivos"]
+        roc = metricas["roc_auc"]
+        roc_texto = "N/A (rótulo com uma só classe)" if roc is None else f"{roc:.4f}"
         print(f"  - taxa prevista (classe=1): {taxa:.4f}")
         print(
             "  - métricas (rótulo presente): "
-            f"roc_auc={metricas['roc_auc']:.4f}, "
+            f"roc_auc={roc_texto}, "
             f"accuracy={metricas['accuracy']:.4f}, "
             f"precision={metricas['precision']:.4f}, "
             f"recall={metricas['recall']:.4f}, "
