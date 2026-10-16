@@ -10,6 +10,7 @@ exit code para simular o bloqueio da pipeline de ingestão:
 Uso:
     python scripts/validar_lote.py data/reference/reference.csv
     python scripts/validar_lote.py data/corrupted/corrupted_batch.csv
+    python scripts/validar_lote.py data/production/predicoes_t3.csv --perfil inferencia
 """
 
 from __future__ import annotations
@@ -20,7 +21,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from credito.contrato_dados import SUITE_NAME, validar_dataframe
+from credito.contrato_dados import (
+    PERFIL_TREINO,
+    PERFIS,
+    SUITE_NAME,
+    validar_dataframe,
+)
 
 EXIT_OK = 0
 EXIT_BLOCKED = 1
@@ -58,7 +64,7 @@ def _resumo(result_detail) -> str:
     return ", ".join(parts)
 
 
-def executar_validacao(csv_path: Path) -> int:
+def executar_validacao(csv_path: Path, perfil: str = PERFIL_TREINO) -> int:
     if not csv_path.exists():
         print(f"[erro] Arquivo não encontrado: {csv_path}", file=sys.stderr)
         return EXIT_ERROR
@@ -72,12 +78,13 @@ def executar_validacao(csv_path: Path) -> int:
         )
         return EXIT_ERROR
 
-    print(f"Contrato : {SUITE_NAME}")
+    suite_name = f"{SUITE_NAME}_{perfil}"
+    print(f"Contrato : {suite_name} (perfil: {perfil})")
     print(f"Arquivo  : {csv_path}")
     print(f"Lote     : {len(frame)} linhas x {frame.shape[1]} colunas")
     print("-" * 78)
 
-    result = validar_dataframe(frame)
+    result = validar_dataframe(frame, perfil)
     details = sorted(result.results, key=lambda detail: detail.success)
     failures = [detail for detail in details if not detail.success]
 
@@ -108,8 +115,14 @@ def main() -> int:
         )
     )
     parser.add_argument("csv", type=Path, help="Caminho do CSV do lote.")
+    parser.add_argument(
+        "--perfil",
+        choices=PERFIS,
+        default=PERFIL_TREINO,
+        help="treino (exige rótulo) ou inferencia (lote de produção, sem rótulo).",
+    )
     args = parser.parse_args()
-    return executar_validacao(args.csv)
+    return executar_validacao(args.csv, args.perfil)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,13 @@
-"""Etapa 2: drift de features (JSON + HTML), após validação do contrato."""
+"""Etapa 2: drift de features (JSON + HTML), após validação do contrato.
+
+Duas medidas por feature:
+  - KS (Kolmogorov-Smirnov), via Evidently: é o que decide se a coluna tem
+    drift (p_value < limite).
+  - PSI (Population Stability Index), calculado aqui: entra como leitura
+    complementar. Com amostras grandes (o holdout tem ~24k linhas) o KS acusa
+    diferenças pequenas como significativas; o PSI mede o *tamanho* da mudança
+    e é a métrica que o mercado de crédito costuma usar.
+"""
 
 from __future__ import annotations
 
@@ -10,11 +19,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from evidently import DataDefinition, Dataset, Report
 from evidently.metrics import ValueDrift
 
-from credito.contrato_dados import validar_dataframe
+from credito.contrato_dados import PERFIL_INFERENCIA, PERFIL_TREINO, validar_dataframe
 from credito.esquema import FEATURES
 from credito.relatorio_drift import gerar_html_drift
 
@@ -26,12 +36,98 @@ MIN_ROWS = 100
 P_VALUE = 0.05
 DRIFT_SHARE = 0.5
 
+# Faixas de leitura do PSI mais citadas (regra de bolso, não lei):
+# < 0.1 estável, 0.1 a 0.25 mudança moderada, >= 0.25 mudança forte.
+PSI_MODERADO = 0.1
+PSI_FORTE = 0.25
+PSI_BINS = 10
+
 # Mesmo padrão do validador: 0 aprovado, 1 contrato reprovado, 2 erro.
 # 3 distingue drift estatístico de lote inválido.
 EXIT_STABLE = 0
 EXIT_INVALID = 1
 EXIT_ERROR = 2
 EXIT_DRIFT = 3
+
+
+def _validar_bins(bins: object) -> None:
+    if (
+        isinstance(bins, (bool, np.bool_))
+        or not isinstance(bins, (int, np.integer))
+        or bins < 2
+    ):
+        raise ValueError("bins deve ser um inteiro >= 2")
+
+
+def _validar_serie(serie: object, nome: str) -> None:
+    if getattr(serie, "ndim", 1) != 1:
+        raise ValueError(f"{nome}: a entrada deve ser unidimensional")
+    if isinstance(serie, pd.Series) and serie.empty:
+        raise ValueError(f"{nome}: série vazia")
+    if not pd.api.types.is_numeric_dtype(serie) or pd.api.types.is_bool_dtype(serie):
+        raise ValueError(f"{nome}: coluna não numérica")
+    if pd.api.types.is_complex_dtype(serie):
+        raise ValueError(f"{nome}: coluna não numérica (complexa)")
+    valores = np.asarray(serie, dtype=float)
+    if valores.size == 0:
+        raise ValueError(f"{nome}: série vazia")
+    if not np.isfinite(valores).all():
+        raise ValueError(f"{nome}: contém NaN ou infinito; use valores finitos")
+
+
+def calcular_psi(
+    referencia: pd.Series, atual: pd.Series, bins: int = PSI_BINS
+) -> float:
+    """PSI = soma((%atual - %ref) * ln(%atual / %ref)) nas faixas da referência.
+
+    As faixas são os quantis da referência. Em colunas de contagem (atrasos,
+    dependentes) vários quantis caem no mesmo valor (ex.: quase tudo é 0),
+    então removo as bordas repetidas e fico com menos faixas. Exceção: se a
+    referência é constante, os quantis não geram faixas úteis, então uso três
+    faixas explícitas (<, == e > o valor) para o deslocamento aparecer nos
+    dois sentidos.
+    """
+    _validar_bins(bins)
+    _validar_serie(referencia, "referência")
+    _validar_serie(atual, "atual")
+    valores_ref = np.asarray(referencia, dtype=float)
+    valores_atual = np.asarray(atual, dtype=float)
+    if np.all(valores_ref == valores_ref[0]):
+        constante = valores_ref[0]
+        massa_ref = np.array([0.0, 1.0, 0.0])
+        massa_atual = np.array(
+            [
+                np.count_nonzero(valores_atual < constante),
+                np.count_nonzero(valores_atual == constante),
+                np.count_nonzero(valores_atual > constante),
+            ],
+            dtype=float,
+        ) / len(valores_atual)
+    else:
+        quantis = np.quantile(valores_ref, np.linspace(0, 1, bins + 1))
+        bordas = np.unique(quantis[1:-1])
+        # right=True -> faixas "até a borda": (..., b1], (b1, b2], ..., (bn, ...)
+        faixa_ref = np.digitize(valores_ref, bordas, right=True)
+        faixa_atual = np.digitize(valores_atual, bordas, right=True)
+        total_faixas = len(bordas) + 1
+        massa_ref = np.bincount(faixa_ref, minlength=total_faixas) / len(valores_ref)
+        massa_atual = (
+            np.bincount(faixa_atual, minlength=total_faixas) / len(valores_atual)
+        )
+    # Evita log(0) em faixa vazia e normaliza para as massas somarem 1.
+    pct_ref = np.clip(massa_ref, 1e-6, None)
+    pct_atual = np.clip(massa_atual, 1e-6, None)
+    pct_ref = pct_ref / pct_ref.sum()
+    pct_atual = pct_atual / pct_atual.sum()
+    return float(np.sum((pct_atual - pct_ref) * np.log(pct_atual / pct_ref)))
+
+
+def nivel_psi(psi: float) -> str:
+    if psi >= PSI_FORTE:
+        return "forte"
+    if psi >= PSI_MODERADO:
+        return "moderado"
+    return "estavel"
 
 
 def _identidade(path: Path, frame: pd.DataFrame) -> dict:
@@ -73,7 +169,13 @@ def _gravar(path: Path, payload: dict) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def _gravar_html(reference: pd.DataFrame, current: pd.DataFrame, path: Path) -> None:
+def _gravar_html(
+    reference: pd.DataFrame,
+    current: pd.DataFrame,
+    path: Path,
+    p_value: float = P_VALUE,
+    drift_share: float = DRIFT_SHARE,
+) -> None:
     """Gera o HTML em temporário do mesmo diretório e substitui atomicamente."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
@@ -82,7 +184,9 @@ def _gravar_html(reference: pd.DataFrame, current: pd.DataFrame, path: Path) -> 
             mode="w", encoding="utf-8", dir=path.parent, suffix=".html", delete=False
         ) as output:
             temporary = Path(output.name)
-        gerar_html_drift(reference, current, temporary)
+        gerar_html_drift(
+            reference, current, temporary, p_value=p_value, drift_share=drift_share
+        )
         os.replace(temporary, path)
     finally:
         if temporary is not None:
@@ -113,6 +217,8 @@ def comparar(
         raise ValueError(
             "O caminho do HTML deve ser diferente dos CSVs de entrada"
         )
+    if html_path is not None and html_path.resolve() == report_path.resolve():
+        raise ValueError("O caminho do HTML deve ser diferente do relatório")
     # Uma falha posterior não deve deixar um resultado de execução anterior utilizável.
     report_path.unlink(missing_ok=True)
     if html_path is not None:
@@ -133,15 +239,18 @@ def comparar(
             "min_rows": min_rows,
             "regra_coluna": "p_value < p_value_limite",
             "regra_agregada": "share >= share_minimo",
+            "metrica_complementar": "psi (não decide o exit code)",
+            "psi_faixas": {"moderado": PSI_MODERADO, "forte": PSI_FORTE},
         },
     }
 
     # A referência inválida é erro de configuração, não lote inválido.
-    reference_result = validar_dataframe(reference)
+    reference_result = validar_dataframe(reference, PERFIL_TREINO)
     if not reference_result.success:
         raise ValueError("Referência não passou no contrato de dados")
 
-    current_result = validar_dataframe(current)
+    # O lote é dado de produção: pode vir sem rótulo ou já com as predições.
+    current_result = validar_dataframe(current, PERFIL_INFERENCIA)
     if not current_result.success:
         payload["status"] = "lote_invalido"
         payload["regras_violadas"] = sorted(
@@ -168,7 +277,13 @@ def comparar(
     for metric in snapshot.dict()["metrics"]:
         column = metric["config"]["column"]
         score = float(metric["value"])
-        columns[column] = {"p_value": score, "drift": score < p_value}
+        psi = calcular_psi(reference[column], current[column])
+        columns[column] = {
+            "p_value": score,
+            "drift": score < p_value,
+            "psi": round(psi, 4),
+            "psi_nivel": nivel_psi(psi),
+        }
     if set(columns) != set(FEATURES):
         raise ValueError("Evidently não retornou resultado para todas as features")
     count = sum(info["drift"] for info in columns.values())
@@ -187,7 +302,7 @@ def comparar(
         }
     )
     if html_path is not None:
-        _gravar_html(reference, current, html_path)
+        _gravar_html(reference, current, html_path, p_value, drift_share)
     _gravar(report_path, payload)
     return EXIT_DRIFT if detected else EXIT_STABLE
 
@@ -228,11 +343,25 @@ def main() -> int:
         EXIT_ERROR: "erro",
         EXIT_DRIFT: "drift_detectado",
     }
+    if code in (EXIT_STABLE, EXIT_DRIFT):
+        _imprimir_colunas(args.report)
     message = f"RESULTADO: {labels[code]} (exit code {code}); relatório: {args.report}"
     if code in (EXIT_STABLE, EXIT_DRIFT):
         message += f"; HTML: {args.html}"
     print(message)
     return code
+
+
+def _imprimir_colunas(report_path: Path) -> None:
+    """Tabelinha no console com KS e PSI de cada feature (lida do JSON)."""
+    colunas = json.loads(report_path.read_text(encoding="utf-8"))["colunas"]
+    print(f"{'feature':<40} {'p_value KS':>11} {'drift':>6} {'PSI':>8}  nível PSI")
+    for nome, info in colunas.items():
+        drift = "sim" if info["drift"] else "não"
+        print(
+            f"{nome:<40} {info['p_value']:>11.4g} {drift:>6} "
+            f"{info['psi']:>8.4f}  {info['psi_nivel']}"
+        )
 
 
 if __name__ == "__main__":

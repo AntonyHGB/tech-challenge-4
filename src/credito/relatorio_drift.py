@@ -20,14 +20,24 @@ from credito.esquema import FEATURES
 
 
 def gerar_html_drift(
-    reference: pd.DataFrame, current: pd.DataFrame, html_path: Path
+    reference: pd.DataFrame,
+    current: pd.DataFrame,
+    html_path: Path,
+    p_value: float = 0.05,
+    drift_share: float = 0.5,
 ) -> Path:
     """Compara Referência x Produção e grava o relatório HTML do Evidently."""
     definition = DataDefinition(numerical_columns=FEATURES)
     ref_data = Dataset.from_pandas(reference[FEATURES], data_definition=definition)
     cur_data = Dataset.from_pandas(current[FEATURES], data_definition=definition)
 
-    snapshot = Report([DataDriftPreset()]).run(cur_data, ref_data)
+    preset = DataDriftPreset(
+        columns=FEATURES,
+        method="ks",
+        threshold=p_value,
+        drift_share=drift_share,
+    )
+    snapshot = Report([preset]).run(cur_data, ref_data)
 
     html_path.parent.mkdir(parents=True, exist_ok=True)
     snapshot.save_html(str(html_path))

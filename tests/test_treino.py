@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 
 import joblib
+from conftest import construir_lote
 
-from credito.modelo import construir_modelo, treinar
+from credito.modelo import construir_modelo, dividir_referencia, treinar
 
 METRICAS = ("roc_auc", "accuracy", "precision", "recall", "f1")
 
@@ -33,3 +34,14 @@ def test_treino_grava_modelo_e_metricas(lote_limpo, tmp_path):
     for nome in METRICAS:
         assert 0 <= metricas[nome] <= 1
     assert json.loads(metricas_path.read_text()) == metricas
+
+
+def test_split_treino_holdout_e_disjunto_e_estavel():
+    """O holdout (base da produção simulada) nunca pode ter linha do treino."""
+    referencia = construir_lote(500)
+    treino, holdout = dividir_referencia(referencia)
+    assert set(treino.index).isdisjoint(holdout.index)
+    assert len(treino) + len(holdout) == len(referencia)
+    # Mesmo corte sempre (treino e simulação dependem disso).
+    _, de_novo = dividir_referencia(referencia)
+    assert list(de_novo.index) == list(holdout.index)
