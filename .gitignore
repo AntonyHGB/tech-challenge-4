@@ -23,3 +23,8 @@ dist/
 # Caches de ferramentas
 .ipynb_checkpoints/
 .DS_Store
+
+# Observabilidade local (banco SQLite MLflow e artefatos gerados)
+mlflow.db
+mlartifacts/
+runs/
