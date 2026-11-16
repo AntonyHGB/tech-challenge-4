@@ -1,11 +1,13 @@
-# Tech Challenge Fase 4 — Etapas 1, 2 e 3: Contratos, Drift e Monitoramento
+# Tech Challenge Fase 4 — Risco de crédito
 
-MVP das Etapas 1, 2 e 3: um classificador binário baseline de **risco de crédito**
+Projeto das Etapas 1 a 4: um classificador binário baseline de **risco de crédito**
 (Give Me Some Credit) protegido por um **contrato de dados** com Great
 Expectations, que **bloqueia a ingestão** de lotes fora do contrato, mais a
 demonstração de **drift** sobre um Dataset de Produção simulado, e o
 monitoramento local do pipeline com **MLflow** (runs, logs JSONL e métricas
-de recursos) na Etapa 3.
+de recursos), com o plano de governança e privacidade no final deste README.
+
+> Prazo de entrega informado pelo autor: **17/11/2026**.
 
 ## O que este MVP entrega
 
@@ -26,6 +28,9 @@ de recursos) na Etapa 3.
    CLI registra cada execução como *run* no experimento `credito-pipeline`,
    com logs JSONL, métricas de contrato, drift, performance e recursos, e
    persistência em SQLite; a UI é apenas local e manual.
+6. **Etapa 4**: avaliação **documental** de **governança LGPD** do mesmo MVP
+   (classificação dos dados e papéis, base legal, retenção, vieses e
+   causalidade) na seção final deste README — **sem implementação nova**.
 
 ## Estrutura
 
@@ -219,10 +224,10 @@ mesmas colunas) e avisa no console — o MVP roda de ponta a ponta de qualquer
 forma. Para usar o dado real depois, autentique com `kagglehub.login()` ou
 coloque `~/.kaggle/kaggle.json` e rode `python scripts/baixar_dataset.py --force`.
 
-## Fora de escopo (outras etapas)
+## Limites do projeto
 
-Agregação/alertas contínuos de observabilidade (Prometheus/Grafana),
-documentação LGPD (Etapa 4) e vídeo.
+Agregação/alertas contínuos de observabilidade (Prometheus/Grafana) e
+autenticação/criptografia do monitoramento local no MVP.
 
 ## Etapa 2 — Dataset de Produção, predições e drift
 
@@ -409,3 +414,59 @@ registre PII nem CSVs com dados de clientes.
 A ressalva do CLI legado permanece: o `detectar_drift.py` da Etapa 2
 compara por padrão contra a Referência **completa**, que inclui o holdout —
 veja as limitações na seção anterior.
+
+## Etapa 4 — Governança, LGPD e causalidade
+
+Projeto acadêmico com dados públicos do Give Me Some Credit, sem concessão
+real de crédito. Esta etapa é documental.
+
+### Dados e privacidade
+
+O dataset não contém nome ou CPF, mas idade, renda e histórico financeiro
+podem contribuir para identificar pessoas. Não afirmamos anonimização
+comprovada; dados públicos também exigem cuidado.
+
+A limpeza remove o índice original, nulos e duplicatas. Os logs padrão
+registram métricas e nomes de regras, sem linhas de clientes. Dados gerados,
+modelos e banco MLflow ficam fora do Git. Antes de compartilhar relatórios,
+revisar seu conteúdo e não cruzar a base com fontes para reidentificação.
+Para demonstrações sem registros reais, usar `baixar_dataset.py --force-synthetic`.
+
+### Base legal e responsabilidades
+
+Em um uso real, a fintech seria a controladora; fornecedores que tratassem
+os dados em seu nome seriam operadores. A hipótese de proteção do crédito
+(art. 7º, X, da LGPD) precisaria ser validada para a finalidade do tratamento.
+Usar uma base pública não dispensa essa análise. O mantenedor é responsável
+pelos arquivos e pela revisão das publicações deste projeto.
+
+### Retenção e direitos
+
+Política proposta: guardar os arquivos até a avaliação final + 90 dias e,
+depois, excluir manualmente dados e derivados locais, modelos, runs e caches.
+Revisar também dados no Git, histórico, backups e artefatos da CI; o projeto
+não apaga automaticamente cópias ou forks. Os 90 dias são uma escolha do
+projeto, não um prazo imposto pela LGPD.
+
+Antes de uso real, oferecer acesso e correção dos dados e revisão de decisões
+automatizadas (arts. 18 e 20), com análise humana como política do serviço.
+Esses canais não estão implementados neste protótipo.
+
+### Vieses, causalidade e resposta
+
+Excluir registros sem renda e usar idade/renda pode afetar grupos de forma
+diferente. A revisão proposta é comparar precision, recall e erros por faixa
+de idade e renda; essa auditoria ainda não foi executada.
+
+A hipótese da simulação é: crise econômica → mudança em renda, dívida e
+atrasos → possível queda de desempenho. Os deslocamentos e as mudanças de
+rótulo são artificiais e não provam causalidade no mundo real. KS/PSI medem
+mudança nas entradas; a queda de desempenho é verificada pelas métricas com
+rótulo, comparadas ao cenário estável.
+
+O contrato já bloqueia lotes inválidos. Em caso de falha ou drift, consultar
+o run e os relatórios; investigar os dados antes de decidir por retreino.
+Não há retreino automático. Retenção, atendimento ao titular e auditoria de
+viés são propostas, sem automação nesta entrega.
+
+Referência: [LGPD — Lei nº 13.709/2018](https://www2.camara.leg.br/legin/fed/lei/2018/lei-13709-14-agosto-2018-787077-normaatualizada-pl.html).
