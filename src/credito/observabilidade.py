@@ -1,20 +1,8 @@
-"""Etapa 3: observabilidade local — MLflow (SQLite) + logs JSONL e métricas da máquina.
+"""Monitoramento local com MLflow, SQLite e logs JSONL.
 
-Fluxo simples e documentado:
-    with Monitoramento(diretorio, "nome-execucao") as mon:
-        with mon.etapa("preparacao"):
-            mon.registrar_metricas({"linhas": n})
-            mon.registrar_artefato(mon.diretorio_execucao / "arquivo.csv")
-            mon.alerta("drift", "desvio detectado")
-        mon.resultado("drift", 3)  # opcional; sem exceção o padrão é ("ok", 0)
-
-Exceção inesperada dentro do ``with`` registra resultado ("erro", 2), status
-MLflow FAILED e não é engolida. Falha ao persistir logs/artefato no desfecho
-segue o mesmo rumo: resultado ("erro", 2), FAILED e exceção preservada. Banco
-SQLite em ``diretorio/mlflow.db`` e
-artefatos em ``diretorio/mlartifacts``; eventos operacionais em
-``diretorio/runs/<run_id>/logs.jsonl`` (sem dados de clientes, segredos,
-mensagens brutas de exceção ou paths absolutos).
+Registra etapas, métricas, alertas e relatórios por run. Exceções e falhas de
+persistência marcam o run como FAILED e são propagadas. Os logs padrão não
+incluem dados de clientes nem mensagens brutas de exceção.
 """
 
 from __future__ import annotations

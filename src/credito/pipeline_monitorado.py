@@ -1,21 +1,7 @@
-"""Etapa 3 — Pipeline monitorado: baseline + produção simulada + drift no MLflow.
+"""Etapa 3: executa preparação, contrato, treino, predição e drift em um run.
 
-Orquestra, em um único run do MLflow local (SQLite), as etapas existentes do
-projeto — preparação, contrato de dados, treino, simulação de produção,
-predição e comparação de drift — reutilizando os módulos da Etapas 1 e 2 e a
-classe ``Monitoramento`` (observabilidade). Nenhum dado de cliente e nenhuma
-mensagem bruta de exceção vai para os logs operacionais.
-
-Cenários do lote de produção (sempre derivado do holdout, nunca visto no treino):
-  - ``estavel`` : o holdout intocado, agindo como um "t0" fingido;
-  - ``drift``   : o último estágio de ``simular_producao`` (passagem do tempo);
-  - ``invalido``: o holdout com uma idade fora da faixa do contrato (bloqueio).
-
-Exit codes: 0 estável, 1 bloqueado (qualidade), 2 erro, 3 drift detectado.
-
-Uso:
-    python scripts/monitorar_pipeline.py
-    python scripts/monitorar_pipeline.py --cenario estavel --estagio 3
+A produção vem do holdout, separado do treino. Cenários: estável, crise simulada
+ou lote inválido. Saídas: 0 estável, 1 bloqueado, 2 erro, 3 drift.
 """
 
 from __future__ import annotations
